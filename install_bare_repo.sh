@@ -81,7 +81,7 @@ if ! command -v certbot &> /dev/null; then
 fi
 
 # 安装 Certbot Cloudflare 插件
-if ! command -v certbot &> /dev/null; then
+if ! command -v python3-certbot-dns-cloudflare &> /dev/null; then
   echo "Certbot Cloudflare 插件未安装，开始安装..."
   $INSTALL_CMD python3-certbot-dns-cloudflare
 fi
