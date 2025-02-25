@@ -86,6 +86,12 @@ if ! command -v python3-certbot-dns-cloudflare &> /dev/null; then
   $INSTALL_CMD python3-certbot-dns-cloudflare
 fi
 
+# 安装 Certbot nginx 插件
+if ! command -v python3-certbot-nginx &> /dev/null; then
+  echo "Certbot Cloudflare 插件未安装，开始安装..."
+  $INSTALL_CMD python3-certbot-nginx
+fi
+
 # 安装 rsync
 if ! command -v rsync &> /dev/null; then
   echo "rsync 未安装，开始安装..."
