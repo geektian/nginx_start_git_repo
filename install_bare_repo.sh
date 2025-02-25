@@ -153,77 +153,106 @@ cat << 'EOF' > "$HOOK_FILE"
 #!/usr/bin/env bash
 #
 # post-receive Hook: 在收到 push 后自动同步 Nginx 配置并执行证书部署脚本
+# 请将本脚本放于 /home/git/myproject.git/hooks/post-receive，并赋予可执行权限。
 
 set -e
 
-# 设定路径
-WORK_TREE="/srv/myproject-deploy"
-GIT_DIR="/home/git/myproject.git"
+#---------------------------
+# 1) 路径定义
+#---------------------------
+WORK_TREE="/srv/myproject-deploy"           # 工作区，检出后的文件存放处
+GIT_DIR="/home/git/myproject.git"           # Bare 仓库
 
+# 你的 Nginx 配置在仓库中的相对路径
 NGINX_CONF_SRC="$WORK_TREE/nginx_conf/nginx.conf"
 CONF_D_SRC="$WORK_TREE/nginx_conf/conf.d/"
 SITES_SRC="$WORK_TREE/nginx_conf/sites/"
-EXECUTE_SCRIPT="$WORK_TREE/execute_sh/deploy_certificates.sh"
 
+# 证书部署脚本 & cloudflare.ini
+EXECUTE_SCRIPT="$WORK_TREE/execute_sh/deploy_certificates.sh"
+CLOUDFLARE_INI_SRC="$WORK_TREE/execute_sh/cloudflare.ini"
+
+# 同步到的系统路径
 NGINX_CONF_DEST="/etc/nginx/nginx.conf"
 CONF_D_DEST="/etc/nginx/conf.d/"
 SITES_DEST="/etc/nginx/sites/"
 
-echo "[post-receive] 开始部署 Nginx 配置..."
+#---------------------------
+# 2) 检出仓库内容到 WORK_TREE
+#---------------------------
+echo "[post-receive] 开始部署，检出最新提交..."
+git --work-tree="$WORK_TREE" --git-dir="$GIT_DIR" checkout -f
 
-# 确保目标目录存在
+#---------------------------
+# 3) 确保目标目录都存在，避免 rsync 或 cp 出错
+#---------------------------
+echo "[post-receive] 确保必要目录存在..."
+mkdir -p "$(dirname "$NGINX_CONF_DEST")"  # 确保 /etc/nginx/ 存在
 mkdir -p "$CONF_D_DEST"
 mkdir -p "$SITES_DEST"
+mkdir -p "$WORK_TREE/execute_sh"
 
-# 同步 nginx.conf
+#---------------------------
+# 4) 同步/覆盖 Nginx 配置文件
+#---------------------------
+echo "[post-receive] 检查并覆盖主配置 nginx.conf"
 if [ -f "$NGINX_CONF_SRC" ]; then
-  echo "[post-receive] 同步 nginx.conf 到 $NGINX_CONF_DEST"
-  rsync -avz --delete "$NGINX_CONF_SRC" "$NGINX_CONF_DEST"
+  cp -f "$NGINX_CONF_SRC" "$NGINX_CONF_DEST"
+  echo "  -> 已覆盖: $NGINX_CONF_DEST"
 else
-  echo "[post-receive] ⚠️ 未找到 nginx.conf，跳过同步。"
+  echo "  ⚠️ 未找到 $NGINX_CONF_SRC，跳过覆盖主配置。"
 fi
 
-# 同步 conf.d 配置
+echo "[post-receive] 检查并覆盖 conf.d/"
 if [ -d "$CONF_D_SRC" ]; then
-  echo "[post-receive] 同步 conf.d 配置..."
   rsync -avz --delete "$CONF_D_SRC" "$CONF_D_DEST"
+  echo "  -> 已同步: $CONF_D_DEST"
 else
-  echo "[post-receive] ⚠️ 未找到 conf.d 目录，跳过同步。"
+  echo "  ⚠️ 未找到 $CONF_D_SRC，跳过同步 conf.d。"
 fi
 
-# 确保 /etc/nginx/sites/ 目录存在
-if [ ! -d "$SITES_DEST" ]; then
-  echo "[post-receive] 目录 $SITES_DEST 不存在，创建中..."
-  mkdir -p "$SITES_DEST"
-fi
-
-# 同步 sites 配置
+echo "[post-receive] 检查并覆盖 sites/"
 if [ -d "$SITES_SRC" ]; then
-  echo "[post-receive] 同步 sites 配置..."
   rsync -avz --delete "$SITES_SRC" "$SITES_DEST"
+  echo "  -> 已同步: $SITES_DEST"
 else
-  echo "[post-receive] ⚠️ 未找到 sites 目录，跳过同步。"
+  echo "  ⚠️ 未找到 $SITES_SRC，跳过同步 sites。"
 fi
 
-# 执行证书部署脚本
+#---------------------------
+# 5) 确保 cloudflare.ini 存在并复制到工作区
+#---------------------------
+if [ -f "$CLOUDFLARE_INI_SRC" ]; then
+  echo "[post-receive] 复制 cloudflare.ini 到 $WORK_TREE/execute_sh/ ..."
+  cp -f "$CLOUDFLARE_INI_SRC" "$WORK_TREE/execute_sh/"
+else
+  echo "  ⚠️ 未找到 $CLOUDFLARE_INI_SRC，跳过复制。"
+fi
+
+#---------------------------
+# 6) 执行证书部署脚本
+#---------------------------
 if [ -f "$EXECUTE_SCRIPT" ]; then
-  echo "[post-receive] 执行证书部署脚本..."
+  echo "[post-receive] 执行证书部署脚本: $EXECUTE_SCRIPT"
   bash "$EXECUTE_SCRIPT"
 else
-  echo "[post-receive] ⚠️ 未找到 deploy_certificates.sh，跳过执行。"
+  echo "  ⚠️ 未找到 $EXECUTE_SCRIPT，跳过执行。"
 fi
 
-# 检查 Nginx 配置是否正确
+#---------------------------
+# 7) 检查 Nginx 配置 & 重载
+#---------------------------
 echo "[post-receive] 检查 Nginx 配置..."
 if nginx -t; then
-  echo "[post-receive] ✅ Nginx 配置正确，重载服务..."
+  echo "✅ Nginx 配置检测通过，重载中..."
   systemctl reload nginx
 else
-  echo "[post-receive] ❌ Nginx 配置错误，请检查日志！"
+  echo "❌ Nginx 配置错误，请查看日志！"
   exit 1
 fi
 
 echo "[post-receive] 🎉 部署完成！"
+
 
 EOF
 
