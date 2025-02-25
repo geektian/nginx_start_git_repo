@@ -86,6 +86,12 @@ if ! command -v certbot &> /dev/null; then
   $INSTALL_CMD python3-certbot-dns-cloudflare
 fi
 
+# 安装 rsync
+if ! command -v rsync &> /dev/null; then
+  echo "rsync 未安装，开始安装..."
+  $INSTALL_CMD rsync
+fi
+
 echo "✅ Git、Certbot 和 Certbot Cloudflare 插件安装完成！"
 
 #---------------------------
@@ -224,7 +230,6 @@ fi
 #---------------------------
 if [ -f "$CLOUDFLARE_INI_SRC" ]; then
   echo "[post-receive] 复制 cloudflare.ini 到 $WORK_TREE/execute_sh/ ..."
-  cp -f "$CLOUDFLARE_INI_SRC" "$WORK_TREE/execute_sh/"
 else
   echo "  ⚠️ 未找到 $CLOUDFLARE_INI_SRC，跳过复制。"
 fi
@@ -252,7 +257,6 @@ else
 fi
 
 echo "[post-receive] 🎉 部署完成！"
-
 
 EOF
 
