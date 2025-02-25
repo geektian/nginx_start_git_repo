@@ -180,8 +180,7 @@ NGINX_CONF_SRC="$WORK_TREE/nginx_conf/nginx.conf"
 CONF_D_SRC="$WORK_TREE/nginx_conf/conf.d/"
 SITES_SRC="$WORK_TREE/nginx_conf/sites/"
 
-# 先删除旧的文件，再检出新的站点
-rm -rf $SITES_SRC
+
 
 # 证书部署脚本 & cloudflare.ini
 EXECUTE_SCRIPT="$WORK_TREE/execute_sh/deploy_certificates.sh"
@@ -191,6 +190,9 @@ CLOUDFLARE_INI_SRC="$WORK_TREE/execute_sh/cloudflare.ini"
 NGINX_CONF_DEST="/etc/nginx/nginx.conf"
 CONF_D_DEST="/etc/nginx/conf.d/"
 SITES_DEST="/etc/nginx/sites/"
+
+# 先删除旧的文件，再检出新的站点
+rm -rf "$SITES_DEST"
 
 #---------------------------
 # 2) 检出仓库内容到 WORK_TREE
