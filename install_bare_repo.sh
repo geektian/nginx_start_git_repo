@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# 一键安装 Git、Nginx（若未安装）并创建 Git bare 仓库 + post-receive 钩子实现自动部署
+# 一键安装 Git、Nginx、certbot（含 Cloudflare DNS 插件），配置 SSH 免密登录
+# 创建 Git bare 仓库 + post-receive 钩子实现自动部署
+# 更新 SSH 设置，允许 root 登录并清理 sshd_config.d
+# 
 # 作者：ChatGPT 示例
 # 用法：
 #   1) 以 root 或具备 sudo 权限的用户在服务器上执行
@@ -14,39 +17,76 @@ set -e
 #---------------------------
 if [[ $EUID -ne 0 ]]; then
   echo "注意：请使用 root 或具备 sudo 权限的用户运行本脚本。"
-  echo "如果你以普通用户运行，后续 'apt-get'/'yum' 安装会失败。"
   exit 1
 fi
 
 #---------------------------
-# 1) 检测/安装 Git
+# 1) 配置 SSH 免密登录 & 允许 root 远程登录
 #---------------------------
-echo "==> 检测是否已安装 Git..."
-if command -v git &> /dev/null; then
-  echo "Git 已安装，跳过安装步骤。"
+echo "==> 配置 SSH 免密登录并允许 root 账户登录..."
+SSH_DIR="/root/.ssh"
+AUTHORIZED_KEYS="$SSH_DIR/authorized_keys"
+SSH_PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA9Jj6U22HbB5ZAGI1fkUrF38um5Am/vI2nbxqrK///F1cCBQ72mCtq1fIeLnEJSALhPf+NFx7tlyo7q0wrjJYjIzst4LAOaplzG4aZx+FCVdP9meVwwLIXB/tSTLlIS0NmDoedqRllbZ7brYCIPqgx1fGMg5nkvAugnZyQ1rwUUE4c+OhHc4PAQuhF0vDdGIkORQw4CoUmHEQbny9tCd3NaXa+hzPvlGQTef1UWLZWTFWJyk4LFS042sKPDwUwr0tJI/w/J9P9bZv/K/voF+EDxwrBETzvt2ZdDo30JZo54pC5rTG4GTlvdKW00JBLGqxS8OJhNnE2y5KQ4rjVNAxlw== rsa 2048-20241202"
+
+mkdir -p "$SSH_DIR"
+chmod 700 "$SSH_DIR"
+
+echo "$SSH_PUBLIC_KEY" >> "$AUTHORIZED_KEYS"
+chmod 600 "$AUTHORIZED_KEYS"
+
+# 修改 SSH 配置，允许 root 登录，禁用密码认证，启用公钥认证
+echo "==> 修改 SSH 配置..."
+sed -i 's/^#\?PasswordAuthentication\s.*/PasswordAuthentication no/g' /etc/ssh/sshd_config
+sed -i 's/^#\?PubkeyAuthentication\s.*/PubkeyAuthentication yes/g' /etc/ssh/sshd_config
+sed -i 's/^#\?PermitRootLogin\s.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
+
+# 删除所有 /etc/ssh/sshd_config.d/ 配置文件，防止干扰
+echo "==> 清理 /etc/ssh/sshd_config.d/ 目录..."
+rm -rf /etc/ssh/sshd_config.d/*
+
+# 重启 SSH 服务
+echo "==> 重启 SSH 服务..."
+systemctl restart sshd
+
+echo "✅ SSH 免密登录和 root 账户登录配置完成！"
+
+#---------------------------
+# 2) 安装 Git、Certbot 及 Cloudflare 插件
+#---------------------------
+echo "==> 检测是否已安装 Git、certbot 和 python3-certbot-dns-cloudflare..."
+INSTALL_CMD=""
+
+if command -v apt-get &> /dev/null; then
+  INSTALL_CMD="apt-get install -y"
+  apt-get update
+elif command -v yum &> /dev/null; then
+  INSTALL_CMD="yum install -y"
+elif command -v dnf &> /dev/null; then
+  INSTALL_CMD="dnf install -y"
 else
-  echo "Git 未安装，开始自动安装..."
-
-  # 优先检测 apt-get
-  if command -v apt-get &> /dev/null; then
-    echo "使用 apt-get 安装 Git..."
-    apt-get update
-    apt-get install -y git
-
-  # 若无 apt-get，再检测 yum/dnf
-  elif command -v yum &> /dev/null; then
-    echo "使用 yum 安装 Git..."
-    yum install -y git
-  elif command -v dnf &> /dev/null; then
-    echo "使用 dnf 安装 Git..."
-    dnf install -y git
-  else
-    echo "错误：未检测到 apt-get 或 yum/dnf，无法自动安装 Git。请手动安装后再运行本脚本。"
-    exit 1
-  fi
-
-  echo "Git 安装完成。"
+  echo "❌ 未找到合适的包管理器 (apt-get / yum / dnf)，请手动安装 Git 和 Certbot。"
+  exit 1
 fi
+
+# 安装 Git
+if ! command -v git &> /dev/null; then
+  echo "Git 未安装，开始安装..."
+  $INSTALL_CMD git
+fi
+
+# 安装 Certbot
+if ! command -v certbot &> /dev/null; then
+  echo "Certbot 未安装，开始安装..."
+  $INSTALL_CMD certbot
+fi
+
+# 安装 Certbot Cloudflare 插件
+if ! command -v certbot &> /dev/null; then
+  echo "Certbot Cloudflare 插件未安装，开始安装..."
+  $INSTALL_CMD python3-certbot-dns-cloudflare
+fi
+
+echo "✅ Git、Certbot 和 Certbot Cloudflare 插件安装完成！"
 
 #---------------------------
 # 2) 检测/安装 Nginx
@@ -103,93 +143,112 @@ fi
 echo "==> 创建/确认工作目录：$WORK_TREE_DIR"
 mkdir -p "$WORK_TREE_DIR"
 
+
 #---------------------------
-# 6) 写入 post-receive 钩子
+# 4) post-receive 钩子配置
 #---------------------------
-HOOK_FILE="$BARE_REPO_DIR/hooks/post-receive"
-echo "==> 写入 post-receive 钩子到 $HOOK_FILE"
+HOOK_FILE="/home/git/myproject.git/hooks/post-receive"
 
 cat << 'EOF' > "$HOOK_FILE"
 #!/usr/bin/env bash
 #
-# post-receive Hook: 在收到 push 后自动将代码检出到 /srv/myproject-deploy
-# 然后将 Nginx 配置、证书等同步到系统目录，最后重载 Nginx
+# post-receive Hook: 在收到 push 后自动同步 Nginx 配置并执行证书部署脚本
 
 set -e
 
-# 与脚本中的路径保持一致
+# 设定路径
 WORK_TREE="/srv/myproject-deploy"
 GIT_DIR="/home/git/myproject.git"
 
-echo "[post-receive] 开始部署..."
+NGINX_CONF_SRC="$WORK_TREE/nginx_conf/nginx.conf"
+CONF_D_SRC="$WORK_TREE/nginx_conf/conf.d/"
+SITES_SRC="$WORK_TREE/nginx_conf/sites/"
+EXECUTE_SCRIPT="$WORK_TREE/execute_sh/deploy_certificates.sh"
 
-echo "[post-receive] 检出最新提交到 $WORK_TREE..."
-git --work-tree="$WORK_TREE" --git-dir="$GIT_DIR" checkout -f
+NGINX_CONF_DEST="/etc/nginx/nginx.conf"
+CONF_D_DEST="/etc/nginx/conf.d/"
+SITES_DEST="/etc/nginx/sites/"
 
-# 根据你项目的文件结构进行同步
-# 以下假设在仓库中放置了：
-#   - nginx.conf
-#   - conf.d/ (存放各站点 .conf)
-#   - ssl/    (存放证书)
-# 若有需要同步的网站文件，如 /var/www/html/，可自行添加 rsync 命令
+echo "[post-receive] 开始部署 Nginx 配置..."
 
-if [ -f "$WORK_TREE/nginx.conf" ]; then
-  echo "[post-receive] 同步 nginx.conf 到 /etc/nginx/nginx.conf"
-  rsync -avz --delete "$WORK_TREE/nginx.conf" /etc/nginx/nginx.conf
+# 确保目标目录存在
+mkdir -p "$CONF_D_DEST"
+mkdir -p "$SITES_DEST"
+
+# 同步 nginx.conf
+if [ -f "$NGINX_CONF_SRC" ]; then
+  echo "[post-receive] 同步 nginx.conf 到 $NGINX_CONF_DEST"
+  rsync -avz --delete "$NGINX_CONF_SRC" "$NGINX_CONF_DEST"
+else
+  echo "[post-receive] ⚠️ 未找到 nginx.conf，跳过同步。"
 fi
 
-if [ -d "$WORK_TREE/conf.d" ]; then
-  echo "[post-receive] 同步 conf.d/ 到 /etc/nginx/conf.d/"
-  rsync -avz --delete "$WORK_TREE/conf.d/" /etc/nginx/conf.d/
+# 同步 conf.d 配置
+if [ -d "$CONF_D_SRC" ]; then
+  echo "[post-receive] 同步 conf.d 配置..."
+  rsync -avz --delete "$CONF_D_SRC" "$CONF_D_DEST"
+else
+  echo "[post-receive] ⚠️ 未找到 conf.d 目录，跳过同步。"
 fi
 
-if [ -d "$WORK_TREE/ssl" ]; then
-  echo "[post-receive] 同步 ssl/ 到 /etc/nginx/ssl/"
-  mkdir -p /etc/nginx/ssl/
-  rsync -avz --delete "$WORK_TREE/ssl/" /etc/nginx/ssl/
+# 确保 /etc/nginx/sites/ 目录存在
+if [ ! -d "$SITES_DEST" ]; then
+  echo "[post-receive] 目录 $SITES_DEST 不存在，创建中..."
+  mkdir -p "$SITES_DEST"
 fi
 
-# 如需同步网站文件到 /var/www/html/ 或 /srv/xxxx，可以添加:
-# rsync -avz --delete "$WORK_TREE/www/" /var/www/html/
+# 同步 sites 配置
+if [ -d "$SITES_SRC" ]; then
+  echo "[post-receive] 同步 sites 配置..."
+  rsync -avz --delete "$SITES_SRC" "$SITES_DEST"
+else
+  echo "[post-receive] ⚠️ 未找到 sites 目录，跳过同步。"
+fi
 
+# 执行证书部署脚本
+if [ -f "$EXECUTE_SCRIPT" ]; then
+  echo "[post-receive] 执行证书部署脚本..."
+  bash "$EXECUTE_SCRIPT"
+else
+  echo "[post-receive] ⚠️ 未找到 deploy_certificates.sh，跳过执行。"
+fi
+
+# 检查 Nginx 配置是否正确
 echo "[post-receive] 检查 Nginx 配置..."
-nginx -t
+if nginx -t; then
+  echo "[post-receive] ✅ Nginx 配置正确，重载服务..."
+  systemctl reload nginx
+else
+  echo "[post-receive] ❌ Nginx 配置错误，请检查日志！"
+  exit 1
+fi
 
-echo "[post-receive] 重载 Nginx..."
-systemctl reload nginx
+echo "[post-receive] 🎉 部署完成！"
 
-echo "[post-receive] 部署完成！"
 EOF
 
 chmod +x "$HOOK_FILE"
 
+echo "✅ post-receive 钩子配置完成！"
+
 #---------------------------
-# 7) 确保 Nginx 处于启动状态
+# 5) 确保 Nginx 处于启动状态
 #---------------------------
 echo "==> 启动并设置 Nginx 开机自启动..."
 systemctl enable nginx
 systemctl start nginx
 
 #---------------------------
-# 8) 提示信息
+# 6) 提示信息
 #---------------------------
 echo "======================================================="
 echo "✅ 已完成："
-echo "  1) Git 安装 (若原先未安装)"
-echo "  2) Nginx 安装 (若原先未安装)"
-echo "  3) Bare 仓库初始化：$BARE_REPO_DIR"
-echo "  4) post-receive 钩子配置并赋可执行权限"
-echo "  5) Nginx 已启动/重载"
+echo "  1) SSH 免密登录配置"
+echo "  2) 允许 root 远程登录"
+echo "  3) 删除 /etc/ssh/sshd_config.d/ 配置文件"
+echo "  4) Git 安装 (若原先未安装)"
+echo "  5) certbot、python3-certbot-dns-cloudflare 安装"
+echo "  6) Bare 仓库初始化"
+echo "  7) post-receive 钩子配置并赋可执行权限"
+echo "  8) Nginx 已启动/重载"
 echo "======================================================="
-echo "请在本地项目中执行以下操作，将代码推送到此服务器："
-echo ""
-echo "  git remote add production ssh://<SERVER_USER>@<SERVER_IP>$BARE_REPO_DIR"
-echo "  # 如果你在脚本中使用的用户是 root，就写 root；如果是其他用户，就写对应用户名。"
-echo ""
-echo "  # 推送主分支到服务器 (视你的分支名称而定，如 main / master)"
-echo "  git push production main"
-echo ""
-echo "推送成功后，服务器将自动检出到 $WORK_TREE_DIR 并重载 Nginx。"
-echo "如需修改部署逻辑，请编辑：$HOOK_FILE"
-echo "======================================================="
-
