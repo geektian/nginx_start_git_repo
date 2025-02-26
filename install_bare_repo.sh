@@ -127,6 +127,10 @@ python3 -m venv /opt/certbot/
 # 安装 certbot, certbot-nginx, certbot-dns-cloudflare
 /opt/certbot/bin/pip install certbot certbot-nginx certbot-dns-cloudflare
 
+# 升级 cloudflare
+/opt/certbot/bin/pip install --upgrade cloudflare
+
+
 ###############################
 # 6) 建立 certbot 命令软链接
 ###############################
