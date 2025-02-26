@@ -20,6 +20,26 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+
+# 系统时区设置为 Asia/Shanghai (UTC+8)
+
+# 获取当前系统时区
+CURRENT_TZ=$(timedatectl show --property=Timezone --value)
+
+if [ "$CURRENT_TZ" == "Asia/Shanghai" ]; then
+    echo "系统时区已是 Asia/Shanghai (UTC+8)，无需修改。"
+else
+    echo "当前系统时区为：$CURRENT_TZ"
+    echo "准备将系统时区修改为 Asia/Shanghai (UTC+8)..."
+    
+    # 如果不是 root 用户，可能需要 sudo
+    sudo timedatectl set-timezone Asia/Shanghai
+    
+    # 再次检查
+    NEW_TZ=$(timedatectl show --property=Timezone --value)
+    echo "修改完成，当前系统时区已设为：$NEW_TZ"
+fi
+
 #---------------------------
 # 1) 配置 SSH 免密登录 & 允许 root 远程登录
 #---------------------------
