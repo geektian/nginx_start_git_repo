@@ -53,52 +53,102 @@ echo "✅ SSH 免密登录和 root 账户登录配置完成！"
 #---------------------------
 # 2) 安装 Git、Certbot 及 Cloudflare 插件
 #---------------------------
-echo "==> 检测是否已安装 Git、certbot 和 python3-certbot-dns-cloudflare..."
+echo "==> 开始安装/更新 Git、Python 依赖及 Certbot（Python 虚拟环境方式）..."
+
+###############################
+# 1) 检测包管理器
+###############################
 INSTALL_CMD=""
+REMOVE_CMD=""
+PYTHON_DEPS=""
+AUGEAS_LIB=""
 
 if command -v apt-get &> /dev/null; then
   INSTALL_CMD="apt-get install -y"
+  REMOVE_CMD="apt-get remove -y"
+  PYTHON_DEPS="python3 python3-venv libaugeas0"
+  AUGEAS_LIB="libaugeas0"
   apt-get update
 elif command -v yum &> /dev/null; then
   INSTALL_CMD="yum install -y"
+  REMOVE_CMD="yum remove -y"
+  PYTHON_DEPS="python3 augeas-libs"  # 部分老版本可能需要改成 python36
+  AUGEAS_LIB="augeas-libs"
 elif command -v dnf &> /dev/null; then
   INSTALL_CMD="dnf install -y"
+  REMOVE_CMD="dnf remove -y"
+  PYTHON_DEPS="python3 augeas-libs"
+  AUGEAS_LIB="augeas-libs"
 else
-  echo "❌ 未找到合适的包管理器 (apt-get / yum / dnf)，请手动安装 Git 和 Certbot。"
+  echo "❌ 未找到合适的包管理器 (apt-get / yum / dnf)，请手动安装 Git、Python3、Augeas 等依赖。"
   exit 1
 fi
 
-# 安装 Git
+###############################
+# 2) 安装 Git
+###############################
+echo "==> 检测是否已安装 Git..."
 if ! command -v git &> /dev/null; then
   echo "Git 未安装，开始安装..."
   $INSTALL_CMD git
+else
+  echo "Git 已安装，跳过..."
 fi
 
-# 安装 Certbot
-if ! command -v certbot &> /dev/null; then
-  echo "Certbot 未安装，开始安装..."
-  $INSTALL_CMD certbot
+###############################
+# 3) 安装 Python3 及相关依赖
+###############################
+echo "==> 安装 Certbot 所需的 Python3、venv、Augeas 等依赖..."
+$INSTALL_CMD $PYTHON_DEPS
+
+###############################
+# 4) 卸载系统包管理器安装的 Certbot 及其插件（如有）
+###############################
+echo "==> 卸载系统中可能已存在的 Certbot 及其插件 (避免冲突)..."
+# 尝试卸载 certbot 及常见插件包（如果未安装，则不会卸载任何内容）
+$REMOVE_CMD certbot python3-certbot python3-certbot-nginx python3-certbot-dns-cloudflare 2>/dev/null || true
+
+###############################
+# 5) 在 /opt/certbot 下创建虚拟环境并安装 Certbot、插件
+###############################
+echo "==> 创建 Python 虚拟环境并安装 Certbot、Nginx 插件、Cloudflare 插件..."
+
+# 如果 /opt/certbot 已存在且不是你想要的，可以先 rm -rf /opt/certbot
+if [ ! -d "/opt/certbot" ]; then
+  mkdir -p /opt/certbot
 fi
 
-# 安装 Certbot Cloudflare 插件
-if ! command -v python3-certbot-dns-cloudflare &> /dev/null; then
-  echo "Certbot Cloudflare 插件未安装，开始安装..."
-  $INSTALL_CMD python3-certbot-dns-cloudflare
-fi
+# 创建虚拟环境
+python3 -m venv /opt/certbot/
 
-# 安装 Certbot nginx 插件
-if ! command -v python3-certbot-nginx &> /dev/null; then
-  echo "Certbot Cloudflare 插件未安装，开始安装..."
-  $INSTALL_CMD python3-certbot-nginx
-fi
+# 升级 pip
+/opt/certbot/bin/pip install --upgrade pip
 
-# 安装 rsync
+# 安装 certbot, certbot-nginx, certbot-dns-cloudflare
+/opt/certbot/bin/pip install certbot certbot-nginx certbot-dns-cloudflare
+
+###############################
+# 6) 建立 certbot 命令软链接
+###############################
+echo "==> 创建 /usr/bin/certbot 软链接..."
+if [ -L "/usr/bin/certbot" ] || [ -f "/usr/bin/certbot" ]; then
+  rm -f /usr/bin/certbot
+fi
+ln -s /opt/certbot/bin/certbot /usr/bin/certbot
+
+###############################
+# 7) 安装 rsync
+###############################
+echo "==> 检测是否已安装 rsync..."
 if ! command -v rsync &> /dev/null; then
   echo "rsync 未安装，开始安装..."
   $INSTALL_CMD rsync
+else
+  echo "rsync 已安装，跳过..."
 fi
 
-echo "✅ Git、Certbot 和 Certbot Cloudflare 插件安装完成！"
+echo "✅ Git、Certbot（虚拟环境安装）及其插件安装完成！"
+echo "==> 现在可以使用 'certbot' 命令来申请或管理证书了。"
 
 #---------------------------
 # 2) 检测/安装 Nginx
