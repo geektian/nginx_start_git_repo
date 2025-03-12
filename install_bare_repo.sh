@@ -157,7 +157,18 @@ fi
 ln -s /opt/certbot/bin/certbot /usr/bin/certbot
 
 ###############################
-# 7) 安装 rsync
+# 7) 安装 logrotate
+###############################
+echo "==> 检测是否已安装 logrotate..."
+if ! command -v logrotate &> /dev/null; then
+  echo "logrotate 未安装，开始安装..."
+  $INSTALL_CMD logrotate
+else
+  echo "logrotate 已安装，跳过..."
+fi
+
+###############################
+# 8) 安装 rsync
 ###############################
 echo "==> 检测是否已安装 rsync..."
 if ! command -v rsync &> /dev/null; then
