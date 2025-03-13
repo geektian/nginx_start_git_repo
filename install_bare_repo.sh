@@ -56,13 +56,26 @@ chmod 600 "$AUTHORIZED_KEYS"
 
 # 修改 SSH 配置，允许 root 登录，禁用密码认证，启用公钥认证
 echo "==> 修改 SSH 配置..."
-sed -i 's/^#\?PasswordAuthentication\s.*/PasswordAuthentication no/g' /etc/ssh/sshd_config
-sed -i 's/^#\?PubkeyAuthentication\s.*/PubkeyAuthentication yes/g' /etc/ssh/sshd_config
-sed -i 's/^#\?PermitRootLogin\s.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
 
-# 删除所有 /etc/ssh/sshd_config.d/ 配置文件，防止干扰
-echo "==> 清理 /etc/ssh/sshd_config.d/ 目录..."
-rm -rf /etc/ssh/sshd_config.d/*
+# 备份原始文件
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+
+# 确保配置项存在且唯一
+sed -i '/^PasswordAuthentication/d' /etc/ssh/sshd_config
+echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
+
+sed -i '/^PubkeyAuthentication/d' /etc/ssh/sshd_config
+echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+
+sed -i '/^PermitRootLogin/d' /etc/ssh/sshd_config
+echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+
+# 清理 /etc/ssh/sshd_config.d/ 目录
+if [ -d "/etc/ssh/sshd_config.d" ]; then
+    echo "==> 清理 /etc/ssh/sshd_config.d/ 目录..."
+    rm -rf /etc/ssh/sshd_config.d/*
+fi
+
 
 # 重启 SSH 服务
 echo "==> 重启 SSH 服务..."
